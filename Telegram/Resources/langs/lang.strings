@@ -6613,6 +6613,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_export_from_beginning" = "Reset";
 "lng_export_till_end" = "Reset";
 "lng_export_start" = "Export";
+"lng_export_start_all_chats_json" = "Export all chats (JSON)";
 "lng_export_state_initializing" = "Initializing...";
 "lng_export_state_userpics" = "Profile photos";
 "lng_export_state_chats_list" = "Processing chats...";
