@@ -899,13 +899,13 @@ void SettingsWidget::refreshButtons(
 		quickJson->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 		quickJson->show();
 		quickJsonClicks = quickJson->clicks(
-		) | rpl::start_with_next([=] {
+		) | rpl::before_next([=] {
 			changeData([&](Settings &data) {
 				data.types = Type::AnyChatsMask;
 				data.fullChats = Type::AnyChatsMask;
 				data.format = Format::Json;
 			});
-		}, quickJson->lifetime()) | rpl::to_empty;
+		}) | rpl::to_empty;
 
 		container->sizeValue(
 		) | rpl::on_next([=](QSize size) {
