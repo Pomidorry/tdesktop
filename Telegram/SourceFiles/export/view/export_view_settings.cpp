@@ -887,18 +887,57 @@ void SettingsWidget::refreshButtons(
 			tr::lng_export_start(),
 			st::defaultBoxButton)
 		: nullptr;
-	if (start) {
-		start->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
-		start->show();
-		_startClicks = start->clicks() | rpl::to_empty;
+	const auto quickJson = (_singlePeerId == 0)
+		? Ui::CreateChild<Ui::RoundButton>(
+			container.get(),
+			tr::lng_export_start_all_chats_json(),
+			st::defaultBoxButton)
+		: nullptr;
+
+	auto quickJsonClicks = rpl::producer<>();
+	if (quickJson) {
+		quickJson->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		quickJson->show();
+		quickJsonClicks = quickJson->clicks(
+		) | rpl::before_next([=] {
+			changeData([&](Settings &data) {
+				data.types = Type::AnyChatsMask;
+				data.fullChats = Type::AnyChatsMask;
+				data.format = Format::Json;
+			});
+		}) | rpl::to_empty;
 
 		container->sizeValue(
 		) | rpl::on_next([=](QSize size) {
 			const auto right = st::defaultBox.buttonPadding.right();
 			const auto top = st::defaultBox.buttonPadding.top();
+			quickJson->moveToLeft(
+				size.width() - quickJson->width() - right,
+				top);
+		}, quickJson->lifetime());
+	}
+
+	auto startClicks = rpl::producer<>();
+	if (start) {
+		start->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
+		start->show();
+		startClicks = start->clicks() | rpl::to_empty;
+
+		container->sizeValue(
+		) | rpl::on_next([=](QSize size) {
+			const auto right = st::defaultBox.buttonPadding.right()
+				+ (quickJson
+					? quickJson->width() + st::defaultBox.buttonPadding.left()
+					: 0);
+			const auto top = st::defaultBox.buttonPadding.top();
 			start->moveToRight(right, top);
 		}, start->lifetime());
 	}
+	_startClicks = start
+		? quickJson
+			? rpl::merge(std::move(startClicks), std::move(quickJsonClicks))
+			: std::move(startClicks)
+		: std::move(quickJsonClicks);
 
 	const auto cancel = Ui::CreateChild<Ui::RoundButton>(
 		container.get(),
@@ -910,10 +949,14 @@ void SettingsWidget::refreshButtons(
 
 	rpl::combine(
 		container->sizeValue(),
-		start ? start->widthValue() : rpl::single(0)
-	) | rpl::on_next([=](QSize size, int width) {
+		start ? start->widthValue() : rpl::single(0),
+		quickJson ? quickJson->widthValue() : rpl::single(0)
+	) | rpl::on_next([=](QSize size, int startWidth, int quickJsonWidth) {
 		const auto right = st::defaultBox.buttonPadding.right()
-			+ (width ? width + st::defaultBox.buttonPadding.left() : 0);
+			+ (startWidth ? startWidth + st::defaultBox.buttonPadding.left() : 0)
+			+ (quickJsonWidth
+				? quickJsonWidth + st::defaultBox.buttonPadding.left()
+				: 0);
 		const auto top = st::defaultBox.buttonPadding.top();
 		cancel->moveToRight(right, top);
 	}, cancel->lifetime());

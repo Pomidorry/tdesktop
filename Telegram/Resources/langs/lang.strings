@@ -1241,6 +1241,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_no_blocked_users" = "None";
 "lng_settings_show_sessions" = "Active sessions";
 "lng_settings_export_data" = "Export Telegram data";
+"lng_settings_export_all_chats_json" = "Export all chats to JSON";
+"lng_settings_export_all_chats_json_done" = "Saved {chats} chats ({messages} messages) to:\n{path}";
+"lng_settings_export_all_chats_json_failed" = "Could not export chats to JSON:\n{error}";
 "lng_settings_destroy_if" = "If away for...";
 
 "lng_settings_terminate_title" = "Terminate old sessions";
@@ -6613,6 +6616,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_export_from_beginning" = "Reset";
 "lng_export_till_end" = "Reset";
 "lng_export_start" = "Export";
+"lng_export_start_all_chats_json" = "Export all chats (JSON)";
 "lng_export_state_initializing" = "Initializing...";
 "lng_export_state_userpics" = "Profile photos";
 "lng_export_state_chats_list" = "Processing chats...";
