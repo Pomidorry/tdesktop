@@ -25,9 +25,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/launcher.h"
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
+#include "dialogs/dialogs_main_list.h"
+#include "data/data_peer.h"
+#include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QSaveFile>
 #include "export/export_manager.h"
-#include "export/export_settings.h"
-#include "export/output/export_output_abstract.h"
 #include "info/downloads/info_downloads_widget.h"
 #include "info/info_memento.h"
 #include "lang/lang_keys.h"
@@ -89,6 +95,78 @@ using namespace Builder;
 	return result;
 }
 #endif // Q_OS_MAC && !OS_MAC_STORE
+
+struct ChatsJsonExportResult {
+	bool ok = false;
+	QString path;
+	QString error;
+	int count = 0;
+};
+
+[[nodiscard]] QString ExportPeerType(not_null<PeerData*> peer) {
+	if (peer->isUser()) {
+		return u"user"_q;
+	} else if (peer->isChat()) {
+		return u"group"_q;
+	}
+	return u"channel"_q;
+}
+
+[[nodiscard]] ChatsJsonExportResult ExportAllChatsToJson(
+		not_null<Main::Session*> session) {
+	auto result = ChatsJsonExportResult();
+	const auto root = File::DefaultDownloadPath(session);
+	auto dir = QDir(root);
+	if (!dir.exists() && !dir.mkpath(u"."_q)) {
+		result.error = u"Could not create the download folder."_q;
+		return result;
+	}
+
+	const auto name = u"TelegramChats_%1.json"_q.arg(
+		QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd_hhmmss"_q));
+	const auto path = dir.filePath(name);
+
+	auto chats = QJsonArray();
+	for (const auto row : session->data().chatsList()->indexed()->all()) {
+		const auto peer = row->key().peer();
+		if (!peer) {
+			continue;
+		}
+		auto item = QJsonObject();
+		item.insert(u"id"_q, QString::number(peer->id.value));
+		item.insert(u"title"_q, peer->name());
+		item.insert(u"type"_q, ExportPeerType(peer));
+		const auto username = peer->username();
+		if (!username.isEmpty()) {
+			item.insert(u"username"_q, username);
+		}
+		chats.push_back(item);
+	}
+
+	auto rootObject = QJsonObject();
+	rootObject.insert(
+		u"exported_at"_q,
+		QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+	rootObject.insert(u"chats_count"_q, chats.size());
+	rootObject.insert(u"chats"_q, chats);
+
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		result.error = file.errorString();
+		return result;
+	}
+	file.write(QJsonDocument(rootObject).toJson(QJsonDocument::Indented));
+	if (!file.commit()) {
+		result.error = file.errorString();
+		return result;
+	}
+
+	result.ok = true;
+	result.path = path;
+	result.count = chats.size();
+	return result;
+}
+
 
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
@@ -1080,18 +1158,20 @@ void BuildExportSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	const auto startAllChatsJsonExport = [=] {
-		auto settings = session->local().readExportSettings();
-		settings.types = Export::Settings::Type::AnyChatsMask;
-		settings.fullChats = Export::Settings::Type::AnyChatsMask;
-		settings.format = Export::Output::Format::Json;
-		settings.availableAt = 0;
-		session->local().writeExportSettings(settings);
-		session->data().clearExportSuggestion();
-		controller->window().hideSettingsAndLayer();
-		base::call_delayed(
-			st::boxDuration,
-			session,
-			[=] { Core::App().exportManager().start(session); });
+		const auto result = ExportAllChatsToJson(session);
+		if (result.ok) {
+			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_done(
+				tr::now,
+				lt_count,
+				result.count,
+				lt_path,
+				QDir::toNativeSeparators(result.path))));
+		} else {
+			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_failed(
+				tr::now,
+				lt_error,
+				result.error)));
+		}
 	};
 
 	builder.addButton({
