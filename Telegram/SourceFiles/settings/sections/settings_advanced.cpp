@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_global_privacy.h"
 #include "apiwrap.h"
 #include "base/call_delayed.h"
+#include "base/unixtime.h"
 #include "base/platform/base_platform_custom_app_icon.h"
 #include "base/platform/base_platform_info.h"
 #include "boxes/about_box.h"
@@ -127,6 +128,16 @@ struct ChatsJsonExportResult {
 	});
 }
 
+[[nodiscard]] int MessageDateFromMtp(const MTPMessage &message) {
+	return message.match([](const MTPDmessage &data) {
+		return data.vdate().v;
+	}, [](const MTPDmessageService &data) {
+		return data.vdate().v;
+	}, [](const MTPDmessageEmpty &data) {
+		return 0;
+	});
+}
+
 [[nodiscard]] QJsonObject SerializeMtpMessage(const MTPMessage &message) {
 	auto result = QJsonObject();
 	message.match([&](const MTPDmessage &data) {
@@ -157,7 +168,8 @@ struct ChatsJsonExportResult {
 		not_null<PeerData*> peer,
 		QJsonArray &messages,
 		QString &error,
-		int &messagesAdded) {
+		int &messagesAdded,
+		TimeId fromDate) {
 	constexpr auto kLimit = 100;
 	auto maxId = 0;
 	auto previousOldestId = 0;
@@ -189,6 +201,7 @@ struct ChatsJsonExportResult {
 
 		auto count = 0;
 		auto oldestId = 0;
+		auto oldestDate = 0;
 		response.match([&](const MTPDmessages_messagesNotModified&) {
 			count = 0;
 		}, [&](const auto &data) {
@@ -196,11 +209,17 @@ struct ChatsJsonExportResult {
 			count = list.size();
 			for (const auto &mtpMessage : list) {
 				const auto id = MessageIdFromMtp(mtpMessage);
+				const auto date = MessageDateFromMtp(mtpMessage);
 				if ((oldestId == 0) || (id < oldestId)) {
 					oldestId = id;
 				}
-				messages.push_back(SerializeMtpMessage(mtpMessage));
-				++messagesAdded;
+				if ((oldestDate == 0) || (date < oldestDate)) {
+					oldestDate = date;
+				}
+				if (date >= fromDate) {
+					messages.push_back(SerializeMtpMessage(mtpMessage));
+					++messagesAdded;
+				}
 			}
 		});
 
@@ -208,6 +227,9 @@ struct ChatsJsonExportResult {
 			break;
 		}
 		if ((oldestId <= 0) || (oldestId == previousOldestId)) {
+			break;
+		}
+		if ((oldestDate > 0) && (oldestDate < fromDate)) {
 			break;
 		}
 		previousOldestId = oldestId;
@@ -250,6 +272,7 @@ struct ChatsJsonExportResult {
 	};
 
 	auto indexChats = QJsonArray();
+	const auto fromDate = base::unixtime::now() - 365 * 24 * 60 * TimeId(60);
 	for (const auto row : session->data().chatsList()->indexed()->all()) {
 		const auto peer = row->key().peer();
 		if (!peer) {
@@ -261,7 +284,8 @@ struct ChatsJsonExportResult {
 			peer,
 			messages,
 			result.error,
-			result.messages)) {
+			result.messages,
+			fromDate)) {
 			return result;
 		}
 
