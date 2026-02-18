@@ -134,7 +134,7 @@ struct ChatsJsonExportResult {
 		not_null<PeerData*> peer,
 		QString &error) {
 	constexpr auto kLimit = 100;
-	auto offsetId = 0;
+	auto maxId = 0;
 	auto previousOldestId = 0;
 	while (true) {
 		auto loop = QEventLoop();
@@ -142,11 +142,11 @@ struct ChatsJsonExportResult {
 		auto result = MTPmessages_Messages();
 		session->api().request(MTPmessages_GetHistory(
 			peer->input(),
-			MTP_int(offsetId),
+			MTP_int(0),
 			MTP_int(0),
 			MTP_int(0),
 			MTP_int(kLimit),
-			MTP_int(0),
+			MTP_int(maxId),
 			MTP_int(0),
 			MTP_long(0)
 		)).done([&](const MTPmessages_Messages &data) {
@@ -185,7 +185,7 @@ struct ChatsJsonExportResult {
 			break;
 		}
 		previousOldestId = oldestId;
-		offsetId = oldestId;
+		maxId = oldestId;
 	}
 	return true;
 }
