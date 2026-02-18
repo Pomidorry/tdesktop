@@ -142,7 +142,7 @@ struct ChatsJsonExportResult {
 			u"date"_q,
 			QDateTime::fromSecsSinceEpoch(data.vdate().v).toString(Qt::ISODate));
 		result.insert(u"out"_q, data.is_out());
-		result.insert(u"text"_q, qs(data.vmessage()));
+		result.insert(u"text"_q, QString());
 	}, [&](const MTPDmessageEmpty &data) {
 		result.insert(u"id"_q, QString::number(data.vid().v));
 		result.insert(u"date"_q, QString());
