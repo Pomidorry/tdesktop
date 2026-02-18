@@ -175,7 +175,7 @@ struct ChatsJsonExportResult {
 				auto message = QJsonObject();
 				message.insert(
 					u"id"_q,
-					QString::number(item->fullId().msg));
+					QString::number(item->fullId().msg.bare));
 				message.insert(
 					u"date"_q,
 					QDateTime::fromSecsSinceEpoch(item->date()).toString(Qt::ISODate));
