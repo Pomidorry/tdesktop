@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QEventLoop>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -118,6 +119,77 @@ struct ChatsJsonExportResult {
 	return u"channel"_q;
 }
 
+[[nodiscard]] int MessageIdFromMtp(const MTPMessage &message) {
+	return message.match([](const MTPDmessage &data) {
+		return data.vid().v;
+	}, [](const MTPDmessageService &data) {
+		return data.vid().v;
+	}, [](const MTPDmessageEmpty &data) {
+		return data.vid().v;
+	});
+}
+
+[[nodiscard]] bool LoadFullChatHistory(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> peer,
+		QString &error) {
+	constexpr auto kLimit = 100;
+	auto offsetId = 0;
+	auto previousOldestId = 0;
+	while (true) {
+		auto loop = QEventLoop();
+		auto failed = false;
+		auto result = MTPmessages_Messages();
+		session->api().request(MTPmessages_GetHistory(
+			peer->input(),
+			MTP_int(offsetId),
+			MTP_int(0),
+			MTP_int(0),
+			MTP_int(kLimit),
+			MTP_int(0),
+			MTP_int(0),
+			MTP_long(0)
+		)).done([&](const MTPmessages_Messages &data) {
+			result = data;
+			loop.quit();
+		}).fail([&](const MTP::Error &apiError) {
+			failed = true;
+			error = QString::number(apiError.code()) + u": "_q + apiError.type();
+			loop.quit();
+		}).send();
+		loop.exec();
+		if (failed) {
+			return false;
+		}
+
+		auto count = 0;
+		auto oldestId = 0;
+		result.match([&](const MTPDmessages_messagesNotModified&) {
+			count = 0;
+		}, [&](const auto &data) {
+			const auto &list = data.vmessages().v;
+			count = list.size();
+			for (const auto &message : list) {
+				const auto id = MessageIdFromMtp(message);
+				if ((oldestId == 0) || (id < oldestId)) {
+					oldestId = id;
+				}
+			}
+		});
+		session->data().processExistingMessages(peer->asChannel(), result);
+
+		if (count < kLimit) {
+			break;
+		}
+		if ((oldestId <= 0) || (oldestId == previousOldestId)) {
+			break;
+		}
+		previousOldestId = oldestId;
+		offsetId = oldestId;
+	}
+	return true;
+}
+
 [[nodiscard]] ChatsJsonExportResult ExportAllChatsToJson(
 		not_null<Main::Session*> session) {
 	auto result = ChatsJsonExportResult();
@@ -156,6 +228,9 @@ struct ChatsJsonExportResult {
 		const auto peer = row->key().peer();
 		if (!peer) {
 			continue;
+		}
+		if (!LoadFullChatHistory(session, peer, result.error)) {
+			return result;
 		}
 
 		auto historyJson = QJsonObject();
