@@ -59,11 +59,11 @@ public:
 
 private:
 	void fillParams(const PasswordCheckState &state);
-	void stopExport();
+	void stopExport(bool activatePanel = true);
 	void createPanel();
 	void updateState(State &&state);
 	void showSettings();
-	void showProgress();
+	void showProgress(bool closeWhenFinished);
 	void showError(const ApiErrorState &error);
 	void showError(const OutputErrorState &error);
 	void showError(const QString &text);
@@ -82,6 +82,7 @@ private:
 	base::weak_qptr<Ui::BoxContent> _confirmStopBox;
 	rpl::event_stream<rpl::producer<>> _panelCloseEvents;
 	bool _stopRequested = false;
+	bool _closeWhenFinished = false;
 	rpl::lifetime _lifetime;
 
 };

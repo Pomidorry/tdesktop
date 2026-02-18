@@ -933,11 +933,8 @@ void SettingsWidget::refreshButtons(
 			start->moveToRight(right, top);
 		}, start->lifetime());
 	}
-	_startClicks = start
-		? quickJson
-			? rpl::merge(std::move(startClicks), std::move(quickJsonClicks))
-			: std::move(startClicks)
-		: std::move(quickJsonClicks);
+	_startClicks = std::move(startClicks);
+	_quickJsonClicks = std::move(quickJsonClicks);
 
 	const auto cancel = Ui::CreateChild<Ui::RoundButton>(
 		container.get(),
@@ -986,6 +983,13 @@ rpl::producer<Settings> SettingsWidget::value() const {
 
 rpl::producer<> SettingsWidget::startClicks() const {
 	return _startClicks.value(
+	) | rpl::map([](Wrap &&wrap) {
+		return std::move(wrap.value);
+	}) | rpl::flatten_latest();
+}
+
+rpl::producer<> SettingsWidget::quickJsonClicks() const {
+	return _quickJsonClicks.value(
 	) | rpl::map([](Wrap &&wrap) {
 		return std::move(wrap.value);
 	}) | rpl::flatten_latest();

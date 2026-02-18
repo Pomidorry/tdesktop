@@ -202,7 +202,13 @@ void PanelController::showSettings() {
 
 	settings->startClicks(
 	) | rpl::on_next([=]() {
-		showProgress();
+		showProgress(false);
+		_process->startExport(*_settings, PrepareEnvironment(_session));
+	}, settings->lifetime());
+
+	settings->quickJsonClicks(
+	) | rpl::on_next([=] {
+		showProgress(true);
 		_process->startExport(*_settings, PrepareEnvironment(_session));
 	}, settings->lifetime());
 
@@ -299,7 +305,8 @@ void PanelController::showError(const QString &text) {
 	_panel->setHideOnDeactivate(false);
 }
 
-void PanelController::showProgress() {
+void PanelController::showProgress(bool closeWhenFinished) {
+	_closeWhenFinished = closeWhenFinished;
 	_settings->availableAt = 0;
 	ClearSuggestStart(_session);
 
@@ -333,6 +340,10 @@ void PanelController::showProgress() {
 
 	_panel->showInner(std::move(progress));
 	_panel->setHideOnDeactivate(true);
+	if (_closeWhenFinished) {
+		LOG(("Export Info: Panel Hide For Background Export."));
+		_panel->hideGetDuration();
+	}
 }
 
 void PanelController::stopWithConfirmation(Fn<void()> callback) {
@@ -374,9 +385,11 @@ void PanelController::stopWithConfirmation(Fn<void()> callback) {
 	}
 }
 
-void PanelController::stopExport() {
+void PanelController::stopExport(bool activatePanel) {
 	_stopRequested = true;
-	_panel->showAndActivate();
+	if (activatePanel) {
+		_panel->showAndActivate();
+	}
 	LOG(("Export Info: Panel Hide By Stop"));
 	_panel->hideGetDuration();
 }
@@ -406,8 +419,13 @@ void PanelController::updateState(State &&state) {
 	} else if (const auto error = std::get_if<OutputErrorState>(&_state)) {
 		showError(*error);
 	} else if (v::is<FinishedState>(_state)) {
-		_panel->setTitle(tr::lng_export_title());
-		_panel->setHideOnDeactivate(false);
+		if (_closeWhenFinished) {
+			LOG(("Export Info: Finished background export."));
+			stopExport(false);
+		} else {
+			_panel->setTitle(tr::lng_export_title());
+			_panel->setHideOnDeactivate(false);
+		}
 	} else if (v::is<CancelledState>(_state)) {
 		LOG(("Export Info: Stop Panel After Cancel."));
 		stopExport();
