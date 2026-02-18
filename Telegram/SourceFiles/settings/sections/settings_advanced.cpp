@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/launcher.h"
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
+#include "data/data_session.h"
 #include "dialogs/dialogs_main_list.h"
 #include "data/data_peer.h"
 #include <QtCore/QDateTime>
