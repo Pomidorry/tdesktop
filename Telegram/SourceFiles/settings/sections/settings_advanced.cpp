@@ -303,7 +303,7 @@ struct ChatsJsonExportResult {
 		}
 		auto messagesByMonth = QMap<QString, QJsonArray>();
 		for (const auto &monthKey : monthKeys) {
-			messagesByMonth.emplace(monthKey, QJsonArray());
+			messagesByMonth.insert(monthKey, QJsonArray());
 		}
 		if (!LoadFullChatHistory(
 			session,
