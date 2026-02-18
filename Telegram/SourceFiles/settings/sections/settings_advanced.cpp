@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "dialogs/dialogs_main_list.h"
 #include "data/data_peer.h"
+#include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/history_view_element.h"
 #include <QtCore/QDateTime>
@@ -1216,9 +1217,9 @@ void BuildExportSection(SectionBuilder &builder) {
 			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_done(
 				tr::now,
 				lt_chats,
-				result.chats,
+				QString::number(result.chats),
 				lt_messages,
-				result.messages,
+				QString::number(result.messages),
 				lt_path,
 				QDir::toNativeSeparators(result.path))));
 		} else {
