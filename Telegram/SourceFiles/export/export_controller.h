@@ -136,7 +136,8 @@ public:
 	// Processing step.
 	void startExport(
 		const Settings &settings,
-		const Environment &environment);
+		const Environment &environment,
+		bool background = false);
 	void skipFile(uint64 randomId);
 	void cancelExportFast();
 

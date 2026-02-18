@@ -57,7 +57,8 @@ public:
 	// Processing step.
 	void startExport(
 		const Settings &settings,
-		const Environment &environment);
+		const Environment &environment,
+		bool background);
 	void skipFile(uint64 randomId);
 	void cancelExportFast();
 
@@ -117,6 +118,7 @@ private:
 	ApiWrap _api;
 	Settings _settings;
 	Environment _environment;
+	bool _background = false;
 
 	Data::DialogsInfo _dialogsInfo;
 	int _dialogIndex = -1;
@@ -294,12 +296,14 @@ bool ControllerObject::ioCatchError(Output::Result result) {
 
 void ControllerObject::startExport(
 		const Settings &settings,
-		const Environment &environment) {
+		const Environment &environment,
+		bool background) {
 	if (!_settings.path.isEmpty()) {
 		return;
 	}
 	_settings = NormalizeSettings(settings);
 	_environment = environment;
+	_background = background;
 	_settings.singleTopicRootId = _topicRootId;
 	_settings.singleTopicPeerId = _topicPeerId;
 
@@ -448,7 +452,9 @@ void ControllerObject::collectDialogsList() {
 	setState(stateDialogsList(0));
 	_api.requestDialogsList([=](int count) {
 		if (count > 0) {
-			setState(stateDialogsList(count - 1));
+			if (!_background) {
+				setState(stateDialogsList(count - 1));
+			}
 		}
 		return true;
 	}, [=](Data::DialogsInfo &&result) {
@@ -476,14 +482,18 @@ void ControllerObject::exportUserpics() {
 		_userpicsCount = start.count;
 		return true;
 	}, [=](DownloadProgress progress) {
-		setState(stateUserpics(progress));
+		if (!_background) {
+			setState(stateUserpics(progress));
+		}
 		return true;
 	}, [=](Data::UserpicsSlice &&slice) {
 		if (ioCatchError(_writer->writeUserpicsSlice(slice))) {
 			return false;
 		}
 		_userpicsWritten += slice.list.size();
-		setState(stateUserpics(DownloadProgress()));
+		if (!_background) {
+			setState(stateUserpics(DownloadProgress()));
+		}
 		return true;
 	}, [=] {
 		if (ioCatchError(_writer->writeUserpicsEnd())) {
@@ -502,14 +512,18 @@ void ControllerObject::exportStories() {
 		_storiesCount = start.count;
 		return true;
 	}, [=](DownloadProgress progress) {
-		setState(stateStories(progress));
+		if (!_background) {
+			setState(stateStories(progress));
+		}
 		return true;
 	}, [=](Data::StoriesSlice &&slice) {
 		if (ioCatchError(_writer->writeStoriesSlice(slice))) {
 			return false;
 		}
 		_storiesWritten += slice.list.size();
-		setState(stateStories(DownloadProgress()));
+		if (!_background) {
+			setState(stateStories(DownloadProgress()));
+		}
 		return true;
 	}, [=] {
 		if (ioCatchError(_writer->writeStoriesEnd())) {
@@ -528,14 +542,18 @@ void ControllerObject::exportProfileMusic() {
 		_profileMusicCount = start.count;
 		return true;
 	}, [=](DownloadProgress progress) {
-		setState(stateProfileMusic(progress));
+		if (!_background) {
+			setState(stateProfileMusic(progress));
+		}
 		return true;
 	}, [=](Data::ProfileMusicSlice &&slice) {
 		if (ioCatchError(_writer->writeProfileMusicSlice(slice))) {
 			return false;
 		}
 		_profileMusicWritten += slice.list.size();
-		setState(stateProfileMusic(DownloadProgress()));
+		if (!_background) {
+			setState(stateProfileMusic(DownloadProgress()));
+		}
 		return true;
 	}, [=] {
 		if (ioCatchError(_writer->writeProfileMusicEnd())) {
@@ -596,17 +614,23 @@ void ControllerObject::exportNextDialog() {
 			_messagesCount = ranges::accumulate(
 				info.messagesCountPerSplit,
 				0);
-			setState(stateDialogs(DownloadProgress()));
+			if (!_background) {
+				setState(stateDialogs(DownloadProgress()));
+			}
 			return true;
 		}, [=](DownloadProgress progress) {
-			setState(stateDialogs(progress));
+			if (!_background) {
+				setState(stateDialogs(progress));
+			}
 			return true;
 		}, [=](Data::MessagesSlice &&result) {
 			if (ioCatchError(_writer->writeDialogSlice(result))) {
 				return false;
 			}
 			_messagesWritten += result.list.size();
-			setState(stateDialogs(DownloadProgress()));
+			if (!_background) {
+				setState(stateDialogs(DownloadProgress()));
+			}
 			return true;
 		}, [=] {
 			if (ioCatchError(_writer->writeDialogEnd())) {
@@ -779,11 +803,15 @@ void ControllerObject::exportTopic() {
 		[=](int count) {
 			_messagesWritten = 0;
 			_messagesCount = count;
-			setState(stateTopic(DownloadProgress()));
+			if (!_background) {
+				setState(stateTopic(DownloadProgress()));
+			}
 			return true;
 		},
 		[=](DownloadProgress progress) {
-			setState(stateTopic(progress));
+			if (!_background) {
+				setState(stateTopic(progress));
+			}
 			return true;
 		},
 		[=](Data::MessagesSlice &&slice) {
@@ -791,7 +819,9 @@ void ControllerObject::exportTopic() {
 				return false;
 			}
 			_messagesWritten += slice.list.size();
-			setState(stateTopic(DownloadProgress()));
+			if (!_background) {
+				setState(stateTopic(DownloadProgress()));
+			}
 			return true;
 		},
 		[=] {
@@ -891,11 +921,12 @@ rpl::producer<State> Controller::state() const {
 
 void Controller::startExport(
 		const Settings &settings,
-		const Environment &environment) {
+		const Environment &environment,
+		bool background) {
 	LOG(("Export Info: Started export to '%1'.").arg(settings.path));
 
 	_wrapped.with([=](Implementation &unwrapped) {
-		unwrapped.startExport(settings, environment);
+		unwrapped.startExport(settings, environment, background);
 	});
 }
 

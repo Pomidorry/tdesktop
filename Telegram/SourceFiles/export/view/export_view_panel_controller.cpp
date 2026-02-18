@@ -203,13 +203,13 @@ void PanelController::showSettings() {
 	settings->startClicks(
 	) | rpl::on_next([=]() {
 		showProgress(false);
-		_process->startExport(*_settings, PrepareEnvironment(_session));
+		_process->startExport(*_settings, PrepareEnvironment(_session), false);
 	}, settings->lifetime());
 
 	settings->quickJsonClicks(
 	) | rpl::on_next([=] {
 		showProgress(true);
-		_process->startExport(*_settings, PrepareEnvironment(_session));
+		_process->startExport(*_settings, PrepareEnvironment(_session), true);
 	}, settings->lifetime());
 
 	settings->cancelClicks(
