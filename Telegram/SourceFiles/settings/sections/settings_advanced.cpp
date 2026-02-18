@@ -236,7 +236,7 @@ struct ChatsJsonExportResult {
 				}
 				const auto monthKey = MonthKeyFromDate(date);
 				auto i = messagesByMonth.find(monthKey);
-				if (i == end(messagesByMonth)) {
+				if (i == messagesByMonth.end()) {
 					continue;
 				}
 				i.value().push_back(SerializeMtpMessage(mtpMessage));
