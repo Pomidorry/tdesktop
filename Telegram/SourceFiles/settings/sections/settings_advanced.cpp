@@ -1162,8 +1162,6 @@ void BuildExportSection(SectionBuilder &builder) {
 		if (result.ok) {
 			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_done(
 				tr::now,
-				lt_count,
-				result.count,
 				lt_path,
 				QDir::toNativeSeparators(result.path))));
 		} else {
