@@ -28,9 +28,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "dialogs/dialogs_main_list.h"
 #include "data/data_peer.h"
-#include "history/history.h"
-#include "history/history_item.h"
-#include "history/view/history_view_element.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QEventLoop>
@@ -45,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "mtproto/core_types.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
@@ -129,17 +127,44 @@ struct ChatsJsonExportResult {
 	});
 }
 
+[[nodiscard]] QJsonObject SerializeMtpMessage(const MTPMessage &message) {
+	auto result = QJsonObject();
+	message.match([&](const MTPDmessage &data) {
+		result.insert(u"id"_q, QString::number(data.vid().v));
+		result.insert(
+			u"date"_q,
+			QDateTime::fromSecsSinceEpoch(data.vdate().v).toString(Qt::ISODate));
+		result.insert(u"out"_q, data.is_out());
+		result.insert(u"text"_q, qs(data.vmessage()));
+	}, [&](const MTPDmessageService &data) {
+		result.insert(u"id"_q, QString::number(data.vid().v));
+		result.insert(
+			u"date"_q,
+			QDateTime::fromSecsSinceEpoch(data.vdate().v).toString(Qt::ISODate));
+		result.insert(u"out"_q, data.is_out());
+		result.insert(u"text"_q, qs(data.vmessage()));
+	}, [&](const MTPDmessageEmpty &data) {
+		result.insert(u"id"_q, QString::number(data.vid().v));
+		result.insert(u"date"_q, QString());
+		result.insert(u"out"_q, false);
+		result.insert(u"text"_q, QString());
+	});
+	return result;
+}
+
 [[nodiscard]] bool LoadFullChatHistory(
 		not_null<Main::Session*> session,
 		not_null<PeerData*> peer,
-		QString &error) {
+		QJsonArray &messages,
+		QString &error,
+		int &messagesAdded) {
 	constexpr auto kLimit = 100;
 	auto maxId = 0;
 	auto previousOldestId = 0;
 	while (true) {
 		auto loop = QEventLoop();
 		auto failed = false;
-		auto result = MTPmessages_Messages();
+		auto response = MTPmessages_Messages();
 		session->api().request(MTPmessages_GetHistory(
 			peer->input(),
 			MTP_int(0),
@@ -150,7 +175,7 @@ struct ChatsJsonExportResult {
 			MTP_int(0),
 			MTP_long(0)
 		)).done([&](const MTPmessages_Messages &data) {
-			result = data;
+			response = data;
 			loop.quit();
 		}).fail([&](const MTP::Error &apiError) {
 			failed = true;
@@ -164,19 +189,20 @@ struct ChatsJsonExportResult {
 
 		auto count = 0;
 		auto oldestId = 0;
-		result.match([&](const MTPDmessages_messagesNotModified&) {
+		response.match([&](const MTPDmessages_messagesNotModified&) {
 			count = 0;
 		}, [&](const auto &data) {
 			const auto &list = data.vmessages().v;
 			count = list.size();
-			for (const auto &message : list) {
-				const auto id = MessageIdFromMtp(message);
+			for (const auto &mtpMessage : list) {
+				const auto id = MessageIdFromMtp(mtpMessage);
 				if ((oldestId == 0) || (id < oldestId)) {
 					oldestId = id;
 				}
+				messages.push_back(SerializeMtpMessage(mtpMessage));
+				++messagesAdded;
 			}
 		});
-		session->data().processExistingMessages(peer->asChannel(), result);
 
 		if (count < kLimit) {
 			break;
@@ -229,7 +255,13 @@ struct ChatsJsonExportResult {
 		if (!peer) {
 			continue;
 		}
-		if (!LoadFullChatHistory(session, peer, result.error)) {
+		auto messages = QJsonArray();
+		if (!LoadFullChatHistory(
+			session,
+			peer,
+			messages,
+			result.error,
+			result.messages)) {
 			return result;
 		}
 
@@ -240,29 +272,6 @@ struct ChatsJsonExportResult {
 		const auto username = peer->username();
 		if (!username.isEmpty()) {
 			historyJson.insert(u"username"_q, username);
-		}
-
-		auto messages = QJsonArray();
-		const auto history = session->data().history(peer);
-		for (const auto &block : history->blocks) {
-			for (const auto &view : block->messages) {
-				const auto item = view->data();
-				auto message = QJsonObject();
-				message.insert(
-					u"id"_q,
-					QString::number(item->fullId().msg.bare));
-				message.insert(
-					u"date"_q,
-					QDateTime::fromSecsSinceEpoch(item->date()).toString(Qt::ISODate));
-				message.insert(
-					u"out"_q,
-					item->out());
-				message.insert(
-					u"text"_q,
-					item->originalText().text);
-				messages.push_back(std::move(message));
-				++result.messages;
-			}
 		}
 		historyJson.insert(u"messages"_q, std::move(messages));
 
