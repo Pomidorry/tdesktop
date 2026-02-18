@@ -28,6 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "dialogs/dialogs_main_list.h"
 #include "data/data_peer.h"
+#include "history/history_item.h"
+#include "history/view/history_view_element.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QJsonArray>
@@ -101,7 +103,9 @@ struct ChatsJsonExportResult {
 	bool ok = false;
 	QString path;
 	QString error;
-	int count = 0;
+	int chats = 0;
+	int files = 0;
+	int messages = 0;
 };
 
 [[nodiscard]] QString ExportPeerType(not_null<PeerData*> peer) {
@@ -123,48 +127,96 @@ struct ChatsJsonExportResult {
 		return result;
 	}
 
-	const auto name = u"TelegramChats_%1.json"_q.arg(
+	const auto name = u"TelegramChats_%1"_q.arg(
 		QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd_hhmmss"_q));
-	const auto path = dir.filePath(name);
+	const auto folder = dir.filePath(name);
+	if (!dir.mkpath(name)) {
+		result.error = u"Could not create export folder."_q;
+		return result;
+	}
 
-	auto chats = QJsonArray();
+	auto writeJson = [&](const QString &path, const QJsonObject &json) {
+		auto file = QSaveFile(path);
+		if (!file.open(QIODevice::WriteOnly)) {
+			result.error = file.errorString();
+			return false;
+		}
+		file.write(QJsonDocument(json).toJson(QJsonDocument::Indented));
+		if (!file.commit()) {
+			result.error = file.errorString();
+			return false;
+		}
+		++result.files;
+		return true;
+	};
+
+	auto indexChats = QJsonArray();
 	for (const auto row : session->data().chatsList()->indexed()->all()) {
 		const auto peer = row->key().peer();
 		if (!peer) {
 			continue;
 		}
-		auto item = QJsonObject();
-		item.insert(u"id"_q, QString::number(peer->id.value));
-		item.insert(u"title"_q, peer->name());
-		item.insert(u"type"_q, ExportPeerType(peer));
+
+		auto historyJson = QJsonObject();
+		historyJson.insert(u"id"_q, QString::number(peer->id.value));
+		historyJson.insert(u"title"_q, peer->name());
+		historyJson.insert(u"type"_q, ExportPeerType(peer));
 		const auto username = peer->username();
 		if (!username.isEmpty()) {
-			item.insert(u"username"_q, username);
+			historyJson.insert(u"username"_q, username);
 		}
-		chats.push_back(item);
+
+		auto messages = QJsonArray();
+		const auto history = session->data().history(peer);
+		for (const auto &block : history->blocks) {
+			for (const auto &view : block->messages) {
+				const auto item = view->data();
+				auto message = QJsonObject();
+				message.insert(
+					u"id"_q,
+					QString::number(item->fullId().msg));
+				message.insert(
+					u"date"_q,
+					QDateTime::fromSecsSinceEpoch(item->date()).toString(Qt::ISODate));
+				message.insert(
+					u"out"_q,
+					item->out());
+				message.insert(
+					u"text"_q,
+					item->originalText().text);
+				messages.push_back(std::move(message));
+				++result.messages;
+			}
+		}
+		historyJson.insert(u"messages"_q, std::move(messages));
+
+		const auto fileName = u"chat_%1.json"_q.arg(
+			QString::number(peer->id.value));
+		if (!writeJson(QDir(folder).filePath(fileName), historyJson)) {
+			return result;
+		}
+
+		auto indexEntry = QJsonObject();
+		indexEntry.insert(u"id"_q, QString::number(peer->id.value));
+		indexEntry.insert(u"title"_q, peer->name());
+		indexEntry.insert(u"file"_q, fileName);
+		indexChats.push_back(std::move(indexEntry));
+		++result.chats;
 	}
 
-	auto rootObject = QJsonObject();
-	rootObject.insert(
+	auto index = QJsonObject();
+	index.insert(
 		u"exported_at"_q,
 		QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-	rootObject.insert(u"chats_count"_q, chats.size());
-	rootObject.insert(u"chats"_q, chats);
-
-	auto file = QSaveFile(path);
-	if (!file.open(QIODevice::WriteOnly)) {
-		result.error = file.errorString();
-		return result;
-	}
-	file.write(QJsonDocument(rootObject).toJson(QJsonDocument::Indented));
-	if (!file.commit()) {
-		result.error = file.errorString();
+	index.insert(u"chats_count"_q, result.chats);
+	index.insert(u"messages_count"_q, result.messages);
+	index.insert(u"chats"_q, std::move(indexChats));
+	if (!writeJson(QDir(folder).filePath(u"index.json"_q), index)) {
 		return result;
 	}
 
 	result.ok = true;
-	result.path = path;
-	result.count = chats.size();
+	result.path = folder;
 	return result;
 }
 
@@ -1163,6 +1215,10 @@ void BuildExportSection(SectionBuilder &builder) {
 		if (result.ok) {
 			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_done(
 				tr::now,
+				lt_chats,
+				result.chats,
+				lt_messages,
+				result.messages,
 				lt_path,
 				QDir::toNativeSeparators(result.path))));
 		} else {

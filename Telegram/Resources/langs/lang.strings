@@ -1242,7 +1242,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_show_sessions" = "Active sessions";
 "lng_settings_export_data" = "Export Telegram data";
 "lng_settings_export_all_chats_json" = "Export all chats to JSON";
-"lng_settings_export_all_chats_json_done" = "Saved chats to:\n{path}";
+"lng_settings_export_all_chats_json_done" = "Saved {chats} chats ({messages} messages) to:\n{path}";
 "lng_settings_export_all_chats_json_failed" = "Could not export chats to JSON:\n{error}";
 "lng_settings_destroy_if" = "If away for...";
 
