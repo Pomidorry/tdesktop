@@ -26,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
 #include "export/export_manager.h"
+#include "export/export_settings.h"
+#include "export/output/export_output_abstract.h"
 #include "info/downloads/info_downloads_widget.h"
 #include "info/info_memento.h"
 #include "lang/lang_keys.h"
@@ -1077,6 +1079,21 @@ void BuildExportSection(SectionBuilder &builder) {
 	builder.addDivider();
 	builder.addSkip();
 
+	const auto startAllChatsJsonExport = [=] {
+		auto settings = session->local().readExportSettings();
+		settings.types = Export::Settings::Type::AnyChatsMask;
+		settings.fullChats = Export::Settings::Type::AnyChatsMask;
+		settings.format = Export::Output::Format::Json;
+		settings.availableAt = 0;
+		session->local().writeExportSettings(settings);
+		session->data().clearExportSuggestion();
+		controller->window().hideSettingsAndLayer();
+		base::call_delayed(
+			st::boxDuration,
+			session,
+			[=] { Core::App().exportManager().start(session); });
+	};
+
 	builder.addButton({
 		.id = u"advanced/export"_q,
 		.title = tr::lng_settings_export_data(),
@@ -1089,6 +1106,14 @@ void BuildExportSection(SectionBuilder &builder) {
 				[=] { Core::App().exportManager().start(session); });
 		},
 		.keywords = { u"export"_q, u"data"_q, u"backup"_q },
+	});
+
+	builder.addButton({
+		.id = u"advanced/export_all_json"_q,
+		.title = tr::lng_settings_export_all_chats_json(),
+		.icon = { &st::menuIconExport },
+		.onClick = startAllChatsJsonExport,
+		.keywords = { u"export"_q, u"json"_q, u"chats"_q, u"backup"_q },
 	});
 
 	builder.addButton({

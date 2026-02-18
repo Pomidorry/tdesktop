@@ -1241,6 +1241,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_no_blocked_users" = "None";
 "lng_settings_show_sessions" = "Active sessions";
 "lng_settings_export_data" = "Export Telegram data";
+"lng_settings_export_all_chats_json" = "Export all chats to JSON";
 "lng_settings_destroy_if" = "If away for...";
 
 "lng_settings_terminate_title" = "Terminate old sessions";
