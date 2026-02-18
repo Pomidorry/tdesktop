@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QEventLoop>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -109,6 +110,10 @@ struct ChatsJsonExportResult {
 	int files = 0;
 	int messages = 0;
 };
+
+void ProcessExportUiEvents() {
+	QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+}
 
 [[nodiscard]] QString ExportPeerType(not_null<PeerData*> peer) {
 	if (peer->isUser()) {
@@ -189,6 +194,7 @@ struct ChatsJsonExportResult {
 	auto offsetId = 0;
 	auto previousOldestId = 0;
 	while (true) {
+		ProcessExportUiEvents();
 		auto loop = QEventLoop();
 		auto failed = false;
 		auto response = MTPmessages_Messages();
@@ -210,6 +216,7 @@ struct ChatsJsonExportResult {
 			loop.quit();
 		}).send();
 		loop.exec();
+		ProcessExportUiEvents();
 		if (failed) {
 			return false;
 		}
@@ -222,6 +229,7 @@ struct ChatsJsonExportResult {
 		}, [&](const auto &data) {
 			const auto &list = data.vmessages().v;
 			count = list.size();
+			auto processed = 0;
 			for (const auto &mtpMessage : list) {
 				const auto id = MessageIdFromMtp(mtpMessage);
 				const auto date = MessageDateFromMtp(mtpMessage);
@@ -241,6 +249,9 @@ struct ChatsJsonExportResult {
 				}
 				i.value().push_back(SerializeMtpMessage(mtpMessage));
 				++messagesAdded;
+				if ((++processed % 128) == 0) {
+					ProcessExportUiEvents();
+				}
 			}
 		});
 
@@ -297,6 +308,7 @@ struct ChatsJsonExportResult {
 	const auto fromDate = base::unixtime::serialize(
 		QDateTime(QDate::currentDate().addMonths(-11).addDays(1 - QDate::currentDate().addMonths(-11).day()), QTime()));
 	for (const auto row : session->data().chatsList()->indexed()->all()) {
+		ProcessExportUiEvents();
 		const auto peer = row->key().peer();
 		if (!peer) {
 			continue;
@@ -323,6 +335,7 @@ struct ChatsJsonExportResult {
 		}
 		auto monthFiles = QJsonArray();
 		for (const auto &monthKey : monthKeys) {
+			ProcessExportUiEvents();
 			auto monthly = QJsonObject();
 			monthly.insert(u"id"_q, QString::number(peer->id.value));
 			monthly.insert(u"title"_q, peer->name());
@@ -1356,22 +1369,13 @@ void BuildExportSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	const auto startAllChatsJsonExport = [=] {
-		const auto result = ExportAllChatsToJson(session);
-		if (result.ok) {
-			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_done(
-				tr::now,
-				lt_chats,
-				QString::number(result.chats),
-				lt_messages,
-				QString::number(result.messages),
-				lt_path,
-				QDir::toNativeSeparators(result.path))));
-		} else {
-			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_failed(
-				tr::now,
-				lt_error,
-				result.error)));
-		}
+		base::call_delayed(0, session, [=] {
+			const auto result = ExportAllChatsToJson(session);
+			if (!result.ok) {
+				LOG(("Settings Info: Export all chats to JSON failed: %1"
+					).arg(result.error));
+			}
+		});
 	};
 
 	builder.addButton({
