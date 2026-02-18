@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QMap>
 #include <QtCore/QSaveFile>
 #include "export/export_manager.h"
 #include "info/downloads/info_downloads_widget.h"
@@ -138,6 +139,20 @@ struct ChatsJsonExportResult {
 	});
 }
 
+[[nodiscard]] QString MonthKeyFromDate(TimeId date) {
+	return QDateTime::fromSecsSinceEpoch(date).toString(u"yyyy-MM"_q);
+}
+
+[[nodiscard]] QStringList LastYearMonthKeys() {
+	auto result = QStringList();
+	auto month = QDate::currentDate();
+	month = QDate(month.year(), month.month(), 1);
+	for (auto i = 11; i >= 0; --i) {
+		result.push_back(month.addMonths(-i).toString(u"yyyy-MM"_q));
+	}
+	return result;
+}
+
 [[nodiscard]] QJsonObject SerializeMtpMessage(const MTPMessage &message) {
 	auto result = QJsonObject();
 	message.match([&](const MTPDmessage &data) {
@@ -166,7 +181,7 @@ struct ChatsJsonExportResult {
 [[nodiscard]] bool LoadFullChatHistory(
 		not_null<Main::Session*> session,
 		not_null<PeerData*> peer,
-		QJsonArray &messages,
+		QMap<QString, QJsonArray> &messagesByMonth,
 		QString &error,
 		int &messagesAdded,
 		TimeId fromDate) {
@@ -216,10 +231,16 @@ struct ChatsJsonExportResult {
 				if ((oldestDate == 0) || (date < oldestDate)) {
 					oldestDate = date;
 				}
-				if (date >= fromDate) {
-					messages.push_back(SerializeMtpMessage(mtpMessage));
-					++messagesAdded;
+				if (date < fromDate) {
+					continue;
 				}
+				const auto monthKey = MonthKeyFromDate(date);
+				auto i = messagesByMonth.find(monthKey);
+				if (i == end(messagesByMonth)) {
+					continue;
+				}
+				i.value().push_back(SerializeMtpMessage(mtpMessage));
+				++messagesAdded;
 			}
 		});
 
@@ -272,43 +293,58 @@ struct ChatsJsonExportResult {
 	};
 
 	auto indexChats = QJsonArray();
-	const auto fromDate = base::unixtime::now() - 365 * 24 * 60 * TimeId(60);
+	const auto monthKeys = LastYearMonthKeys();
+	const auto fromDate = base::unixtime::serialize(
+		QDateTime(QDate::currentDate().addMonths(-11).addDays(1 - QDate::currentDate().addMonths(-11).day()), QTime()));
 	for (const auto row : session->data().chatsList()->indexed()->all()) {
 		const auto peer = row->key().peer();
 		if (!peer) {
 			continue;
 		}
-		auto messages = QJsonArray();
+		auto messagesByMonth = QMap<QString, QJsonArray>();
+		for (const auto &monthKey : monthKeys) {
+			messagesByMonth.emplace(monthKey, QJsonArray());
+		}
 		if (!LoadFullChatHistory(
 			session,
 			peer,
-			messages,
+			messagesByMonth,
 			result.error,
 			result.messages,
 			fromDate)) {
 			return result;
 		}
 
-		auto historyJson = QJsonObject();
-		historyJson.insert(u"id"_q, QString::number(peer->id.value));
-		historyJson.insert(u"title"_q, peer->name());
-		historyJson.insert(u"type"_q, ExportPeerType(peer));
-		const auto username = peer->username();
-		if (!username.isEmpty()) {
-			historyJson.insert(u"username"_q, username);
-		}
-		historyJson.insert(u"messages"_q, std::move(messages));
-
-		const auto fileName = u"chat_%1.json"_q.arg(
-			QString::number(peer->id.value));
-		if (!writeJson(QDir(folder).filePath(fileName), historyJson)) {
+		const auto chatFolderName = u"chat_%1"_q.arg(QString::number(peer->id.value));
+		const auto chatFolderPath = QDir(folder).filePath(chatFolderName);
+		if (!QDir(folder).mkpath(chatFolderName)) {
+			result.error = u"Could not create chat export folder."_q;
 			return result;
+		}
+		auto monthFiles = QJsonArray();
+		for (const auto &monthKey : monthKeys) {
+			auto monthly = QJsonObject();
+			monthly.insert(u"id"_q, QString::number(peer->id.value));
+			monthly.insert(u"title"_q, peer->name());
+			monthly.insert(u"type"_q, ExportPeerType(peer));
+			const auto username = peer->username();
+			if (!username.isEmpty()) {
+				monthly.insert(u"username"_q, username);
+			}
+			monthly.insert(u"month"_q, monthKey);
+			monthly.insert(u"messages"_q, messagesByMonth.value(monthKey));
+			const auto monthFile = monthKey + u".json"_q;
+			if (!writeJson(QDir(chatFolderPath).filePath(monthFile), monthly)) {
+				return result;
+			}
+			monthFiles.push_back(monthFile);
 		}
 
 		auto indexEntry = QJsonObject();
 		indexEntry.insert(u"id"_q, QString::number(peer->id.value));
 		indexEntry.insert(u"title"_q, peer->name());
-		indexEntry.insert(u"file"_q, fileName);
+		indexEntry.insert(u"folder"_q, chatFolderName);
+		indexEntry.insert(u"months"_q, monthFiles);
 		indexChats.push_back(std::move(indexEntry));
 		++result.chats;
 	}
