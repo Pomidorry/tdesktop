@@ -99,7 +99,6 @@ using namespace Builder;
 
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
-	const auto container = builder.container();
 	const auto session = builder.session();
 	const auto account = &session->account();
 
@@ -359,6 +358,7 @@ void BuildWindowTitleSection(SectionBuilder &builder) {
 void BuildSystemIntegrationSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto settings = &Core::App().settings();
+	const auto container = builder.container();
 
 	builder.addDivider();
 	builder.addSkip();
@@ -512,7 +512,6 @@ void BuildSystemIntegrationSection(SectionBuilder &builder) {
 #elif defined Q_OS_WIN // Q_OS_MAC
 	using Behavior = Core::Settings::CloseBehavior;
 
-	const auto container = builder.container();
 	const auto closeToTaskbarShown = container
 		? container->lifetime().make_state<rpl::variable<bool>>(
 			!Core::App().tray().has())
@@ -807,7 +806,6 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 	const auto session = builder.session();
 	const auto settings = &Core::App().settings();
 	const auto isSystem = Platform::Spellchecker::IsSystemSpellchecker();
-	const auto container = builder.container();
 
 	builder.addDivider();
 	builder.addSkip();
@@ -875,10 +873,10 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 }
 
 void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
+	const auto container = builder.container();
 	if (!HasUpdate()) {
 		return;
 	}
-	const auto container = builder.container();
 
 	if (!atTop) {
 		builder.addDivider();

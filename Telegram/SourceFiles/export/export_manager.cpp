@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
+#include "storage/storage_account.h"
 #include "ui/layers/box_content.h"
 #include "base/unixtime.h"
 
