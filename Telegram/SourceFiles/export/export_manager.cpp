@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/export_manager.h"
 
 #include "export/export_controller.h"
+#include "export/export_settings.h"
+#include "export/output/export_output_abstract.h"
 #include "export/view/export_view_panel_controller.h"
 #include "data/data_peer.h"
 #include "main/main_session.h"
@@ -53,6 +55,56 @@ void Manager::start(
 		&session->mtp(),
 		singlePeer);
 	setupPanel(session);
+}
+
+void Manager::startAllChatsJsonBackground(not_null<Main::Session*> session) {
+	if (_controller) {
+		if (_panel) {
+			_panel->activatePanel();
+		}
+		return;
+	}
+	_controller = std::make_unique<Controller>(
+		&session->mtp(),
+		MTP_inputPeerEmpty());
+	auto settings = session->local().readExportSettings();
+	settings.singlePeer = MTP_inputPeerEmpty();
+	settings.singlePeerFrom = 0;
+	settings.singlePeerTill = 0;
+	settings.singleTopicRootId = 0;
+	settings.singleTopicPeerId = 0;
+	settings.singleTopicTitle = QString();
+	settings.types = Settings::Type::AnyChatsMask;
+	settings.fullChats = Settings::Type::AnyChatsMask;
+	settings.format = Output::Format::Json;
+	View::ResolveSettings(session, settings);
+	_backgroundLifetime = rpl::lifetime();
+	session->account().sessionChanges(
+	) | rpl::filter([=](Main::Session *value) {
+		return (value != session);
+	}) | rpl::on_next([=] {
+		stop();
+	}, _backgroundLifetime);
+	_controller->state(
+	) | rpl::on_next([=](State &&state) {
+		if (const auto finished = std::get_if<FinishedState>(&state)) {
+			LOG(("Export Info: Finished background all chats JSON export: %1.")
+				.arg(finished->path));
+			stop();
+		} else if (const auto error = std::get_if<ApiErrorState>(&state)) {
+			LOG(("Export Info: Background all chats JSON export API Error '%1'.")
+				.arg(error->data.type()));
+			stop();
+		} else if (const auto error = std::get_if<OutputErrorState>(&state)) {
+			LOG(("Export Info: Background all chats JSON export Disk Error '%1'.")
+				.arg(error->path));
+			stop();
+		} else if (v::is<CancelledState>(state)) {
+			LOG(("Export Info: Background all chats JSON export cancelled."));
+			stop();
+		}
+	}, _backgroundLifetime);
+	_controller->startExport(settings, View::PrepareEnvironment(session), true);
 }
 
 void Manager::setupPanel(not_null<Main::Session*> session) {
@@ -111,6 +163,7 @@ void Manager::stop() {
 		_viewChanges.fire(nullptr);
 	}
 	_controller = nullptr;
+	_backgroundLifetime = rpl::lifetime();
 }
 
 } // namespace Export

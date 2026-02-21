@@ -24,6 +24,8 @@ class Session;
 namespace Export {
 namespace View {
 
+Environment PrepareEnvironment(not_null<Main::Session*> session);
+
 base::weak_qptr<Ui::BoxContent> SuggestStart(not_null<Main::Session*> session);
 void ClearSuggestStart(not_null<Main::Session*> session);
 bool IsDefaultPath(not_null<Main::Session*> session, const QString &path);
