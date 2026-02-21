@@ -70,13 +70,16 @@ void Manager::startAllChatsJsonBackground(not_null<Main::Session*> session) {
 		MTP_inputPeerEmpty());
 	auto settings = session->local().readExportSettings();
 	settings.singlePeer = MTP_inputPeerEmpty();
-	settings.singlePeerFrom = 0;
+	settings.singlePeerFrom = base::unixtime::now() - (86400 * 365);
 	settings.singlePeerTill = 0;
 	settings.singleTopicRootId = 0;
 	settings.singleTopicPeerId = 0;
 	settings.singleTopicTitle = QString();
 	settings.types = Settings::Type::AnyChatsMask;
 	settings.fullChats = Settings::Type::AnyChatsMask;
+	settings.media.types = MediaSettings::Type::AllMask;
+	settings.media.types &= ~MediaSettings::Type::Photo;
+	settings.media.types &= ~MediaSettings::Type::Sticker;
 	settings.format = Output::Format::Json;
 	View::ResolveSettings(session, settings);
 	_backgroundLifetime = rpl::lifetime();
