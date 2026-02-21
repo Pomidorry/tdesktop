@@ -99,6 +99,7 @@ using namespace Builder;
 
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
+	const auto container = builder.container();
 	const auto session = builder.session();
 	const auto account = &session->account();
 
