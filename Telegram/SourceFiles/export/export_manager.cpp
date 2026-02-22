@@ -37,7 +37,7 @@ QString ExtractTextFromExportMessage(const QJsonValue &value) {
 		return value.toString();
 	} else if (value.isObject()) {
 		const auto object = value.toObject();
-		if (const auto i = object.constFind("text"); i != object.cend()) {
+		if (const auto i = object.constFind("text"); i != object.constEnd()) {
 			return ExtractTextFromExportMessage(*i);
 		}
 		return QString();
