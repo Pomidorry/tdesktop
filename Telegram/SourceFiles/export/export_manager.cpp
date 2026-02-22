@@ -121,6 +121,10 @@ void WriteChatTextFiles(const QString &mainFilePath) {
 
 } // namespace
 
+void WriteChatTextFilesFromJson(const QString &mainFilePath) {
+	WriteChatTextFiles(mainFilePath);
+}
+
 Manager::Manager() = default;
 
 Manager::~Manager() = default;
@@ -197,7 +201,7 @@ void Manager::startAllChatsJsonBackground(not_null<Main::Session*> session) {
 				.arg(mainFilePath));
 			stop();
 			crl::async([mainFilePath] {
-				WriteChatTextFiles(mainFilePath);
+				WriteChatTextFilesFromJson(mainFilePath);
 			});
 		} else if (const auto error = std::get_if<ApiErrorState>(&state)) {
 			LOG(("Export Info: Background all chats JSON export API Error '%1'.")

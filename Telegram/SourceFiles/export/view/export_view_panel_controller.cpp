@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h" // Ui::show().
 #include "styles/style_export.h"
 #include "styles/style_layers.h"
+#include <crl/crl.h>
 
 namespace Export {
 namespace View {
@@ -421,6 +422,12 @@ void PanelController::updateState(State &&state) {
 	} else if (v::is<FinishedState>(_state)) {
 		if (_closeWhenFinished) {
 			LOG(("Export Info: Finished background export."));
+			if (const auto finished = std::get_if<FinishedState>(&_state)) {
+				const auto mainFilePath = finished->path;
+				crl::async([mainFilePath] {
+					WriteChatTextFilesFromJson(mainFilePath);
+				});
+			}
 			stopExport(false);
 		} else {
 			_panel->setTitle(tr::lng_export_title());

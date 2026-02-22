@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <QtCore/QString>
+
 class PeerData;
 
 namespace Ui {
@@ -20,6 +22,8 @@ class Session;
 namespace Export {
 
 class Controller;
+
+void WriteChatTextFilesFromJson(const QString &mainFilePath);
 
 namespace View {
 class PanelController;

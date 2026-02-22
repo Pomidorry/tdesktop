@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 #include "styles/style_export.h"
 #include "styles/style_layers.h"
+#include <QtCore/QDateTime>
 
 namespace Export {
 namespace View {
@@ -904,6 +905,10 @@ void SettingsWidget::refreshButtons(
 				data.types = Type::AnyChatsMask;
 				data.fullChats = Type::AnyChatsMask;
 				data.format = Format::Json;
+				data.singlePeerFrom = base::unixtime::serialize(
+					QDateTime::currentDateTime().addMonths(-12));
+				data.singlePeerTill = 0;
+				data.media.types = MediaTypes();
 			});
 		}) | rpl::to_empty;
 
