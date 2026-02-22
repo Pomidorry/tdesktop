@@ -27,7 +27,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h" // Ui::show().
 #include "styles/style_export.h"
 #include "styles/style_layers.h"
-#include <crl/crl.h>
 
 namespace Export {
 namespace View {
@@ -203,14 +202,8 @@ void PanelController::showSettings() {
 
 	settings->startClicks(
 	) | rpl::on_next([=]() {
-		showProgress(false);
-		_process->startExport(*_settings, PrepareEnvironment(_session), false);
-	}, settings->lifetime());
-
-	settings->quickJsonClicks(
-	) | rpl::on_next([=] {
-		showProgress(true);
-		_process->startExport(*_settings, PrepareEnvironment(_session), true);
+		showProgress();
+		_process->startExport(*_settings, PrepareEnvironment(_session));
 	}, settings->lifetime());
 
 	settings->cancelClicks(
@@ -306,8 +299,7 @@ void PanelController::showError(const QString &text) {
 	_panel->setHideOnDeactivate(false);
 }
 
-void PanelController::showProgress(bool closeWhenFinished) {
-	_closeWhenFinished = closeWhenFinished;
+void PanelController::showProgress() {
 	_settings->availableAt = 0;
 	ClearSuggestStart(_session);
 
@@ -341,10 +333,6 @@ void PanelController::showProgress(bool closeWhenFinished) {
 
 	_panel->showInner(std::move(progress));
 	_panel->setHideOnDeactivate(true);
-	if (_closeWhenFinished) {
-		LOG(("Export Info: Panel Hide For Background Export."));
-		_panel->hideGetDuration();
-	}
 }
 
 void PanelController::stopWithConfirmation(Fn<void()> callback) {
@@ -386,11 +374,9 @@ void PanelController::stopWithConfirmation(Fn<void()> callback) {
 	}
 }
 
-void PanelController::stopExport(bool activatePanel) {
+void PanelController::stopExport() {
 	_stopRequested = true;
-	if (activatePanel) {
-		_panel->showAndActivate();
-	}
+	_panel->showAndActivate();
 	LOG(("Export Info: Panel Hide By Stop"));
 	_panel->hideGetDuration();
 }
@@ -420,19 +406,8 @@ void PanelController::updateState(State &&state) {
 	} else if (const auto error = std::get_if<OutputErrorState>(&_state)) {
 		showError(*error);
 	} else if (v::is<FinishedState>(_state)) {
-		if (_closeWhenFinished) {
-			LOG(("Export Info: Finished background export."));
-			if (const auto finished = std::get_if<FinishedState>(&_state)) {
-				const auto mainFilePath = finished->path;
-				crl::async([mainFilePath] {
-					WriteChatTextFilesFromJson(mainFilePath);
-				});
-			}
-			stopExport(false);
-		} else {
-			_panel->setTitle(tr::lng_export_title());
-			_panel->setHideOnDeactivate(false);
-		}
+		_panel->setTitle(tr::lng_export_title());
+		_panel->setHideOnDeactivate(false);
 	} else if (v::is<CancelledState>(_state)) {
 		LOG(("Export Info: Stop Panel After Cancel."));
 		stopExport();

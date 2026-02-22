@@ -24,8 +24,6 @@ class Session;
 namespace Export {
 namespace View {
 
-Environment PrepareEnvironment(not_null<Main::Session*> session);
-
 base::weak_qptr<Ui::BoxContent> SuggestStart(not_null<Main::Session*> session);
 void ClearSuggestStart(not_null<Main::Session*> session);
 bool IsDefaultPath(not_null<Main::Session*> session, const QString &path);
@@ -61,11 +59,11 @@ public:
 
 private:
 	void fillParams(const PasswordCheckState &state);
-	void stopExport(bool activatePanel = true);
+	void stopExport();
 	void createPanel();
 	void updateState(State &&state);
 	void showSettings();
-	void showProgress(bool closeWhenFinished);
+	void showProgress();
 	void showError(const ApiErrorState &error);
 	void showError(const OutputErrorState &error);
 	void showError(const QString &text);
@@ -84,7 +82,6 @@ private:
 	base::weak_qptr<Ui::BoxContent> _confirmStopBox;
 	rpl::event_stream<rpl::producer<>> _panelCloseEvents;
 	bool _stopRequested = false;
-	bool _closeWhenFinished = false;
 	rpl::lifetime _lifetime;
 
 };

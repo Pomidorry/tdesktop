@@ -27,9 +27,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
 #include "data/data_session.h"
+#include "data/data_peer.h"
 #include "dialogs/dialogs_main_list.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QSet>
+#include <memory>
 #include "export/export_manager.h"
 #include "info/downloads/info_downloads_widget.h"
 #include "info/info_memento.h"
@@ -96,6 +100,195 @@ using namespace Builder;
 
 
 
+
+
+
+class CustomAllChatsTextExporter final
+: public std::enable_shared_from_this<CustomAllChatsTextExporter> {
+public:
+	static void Start(not_null<Main::Session*> session) {
+		std::make_shared<CustomAllChatsTextExporter>(session)->start();
+	}
+
+	explicit CustomAllChatsTextExporter(not_null<Main::Session*> session)
+	: _session(session)
+	, _fromDate(base::unixtime::serialize(
+		QDateTime::currentDateTime().addMonths(-12))) {
+	}
+
+private:
+	static QString SafeName(const QString &value) {
+		auto result = value;
+		for (auto &ch : result) {
+			if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?'
+					|| ch == '"' || ch == '<' || ch == '>' || ch == '|') {
+				ch = '_';
+			}
+		}
+		return result.trimmed();
+	}
+
+	void start() {
+		auto base = QDir(File::DefaultDownloadPath(_session));
+		if (!base.exists() && !base.mkpath(u"."_q)) {
+			return;
+		}
+		const auto folder = u"TelegramChats_%1"_q.arg(
+			QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd_hhmmss"_q));
+		if (!base.mkpath(folder)) {
+			return;
+		}
+		if (!base.cd(folder) || !base.mkpath(u"chats_text"_q) || !base.cd(u"chats_text"_q)) {
+			return;
+		}
+		_output = base.absolutePath();
+
+		for (const auto row : _session->data().chatsList()->indexed()->all()) {
+			if (const auto peer = row->key().peer()) {
+				_peers.push_back(peer);
+			}
+		}
+		processNextChat();
+	}
+
+	void processNextChat() {
+		if (_index >= _peers.size()) {
+			return;
+		}
+		const auto peer = _peers[_index++];
+		_currentPeer = peer;
+		_offsetId = 0;
+		const auto safe = SafeName(peer->name());
+		const auto base = safe.isEmpty()
+			? QString::number(peer->id.value)
+			: (safe + u"_"_q + QString::number(peer->id.value));
+		auto fileName = base + u".txt"_q;
+		auto suffix = 2;
+		while (_usedNames.contains(fileName)) {
+			fileName = base + u"_"_q + QString::number(suffix++) + u".txt"_q;
+		}
+		_usedNames.insert(fileName);
+		_file = std::make_unique<QFile>(QDir(_output).filePath(fileName));
+		if (!_file->open(QIODevice::WriteOnly | QIODevice::Text)) {
+			_file = nullptr;
+			processNextChat();
+			return;
+		}
+		requestBatch();
+	}
+
+	void requestBatch() {
+		constexpr auto kLimit = 100;
+		const auto weak = weak_from_this();
+		_session->api().request(MTPmessages_GetHistory(
+			_currentPeer->input(),
+			MTP_int(_offsetId),
+			MTP_int(0),
+			MTP_int(0),
+			MTP_int(kLimit),
+			MTP_int(0),
+			MTP_int(0),
+			MTP_long(0)
+		)).done([weak](const MTPmessages_Messages &result) {
+			if (const auto self = weak.lock()) {
+				self->handleBatch(result);
+			}
+		}).fail([weak](const MTP::Error &) {
+			if (const auto self = weak.lock()) {
+				self->finishCurrentChat();
+			}
+		}).send();
+	}
+
+	void handleBatch(const MTPmessages_Messages &result) {
+		constexpr auto kLimit = 100;
+		auto oldestId = 0;
+		auto oldestDate = 0;
+		auto count = 0;
+		auto processMessage = [&](const MTPMessage &item) {
+			item.match([&](const MTPDmessage &data) {
+				const auto id = data.vid().v;
+				const auto date = data.vdate().v;
+				if (!oldestId || id < oldestId) {
+					oldestId = id;
+				}
+				if (!oldestDate || date < oldestDate) {
+					oldestDate = date;
+				}
+				if (date < _fromDate || data.vmedia().type() != mtpc_messageMediaEmpty) {
+					return;
+				}
+				const auto text = qs(data.vmessage()).trimmed();
+				if (text.isEmpty()) {
+					return;
+				}
+				const auto when = QDateTime::fromSecsSinceEpoch(date).toString(Qt::ISODate);
+				const auto line = when + "\t" + text + "\n";
+				_file->write(line.toUtf8());
+			}, [&](const MTPDmessageService &data) {
+				const auto id = data.vid().v;
+				const auto date = data.vdate().v;
+				if (!oldestId || id < oldestId) {
+					oldestId = id;
+				}
+				if (!oldestDate || date < oldestDate) {
+					oldestDate = date;
+				}
+			}, [&](const MTPDmessageEmpty &data) {
+				const auto id = data.vid().v;
+				if (!oldestId || id < oldestId) {
+					oldestId = id;
+				}
+			});
+		};
+		result.match([&](const MTPDmessages_messages &data) {
+			count = int(data.vmessages().v.size());
+			for (const auto &item : data.vmessages().v) {
+				processMessage(item);
+			}
+		}, [&](const MTPDmessages_messagesSlice &data) {
+			count = int(data.vmessages().v.size());
+			for (const auto &item : data.vmessages().v) {
+				processMessage(item);
+			}
+		}, [&](const MTPDmessages_channelMessages &data) {
+			count = int(data.vmessages().v.size());
+			for (const auto &item : data.vmessages().v) {
+				processMessage(item);
+			}
+		}, [&](const MTPDmessages_messagesNotModified &) {
+			count = 0;
+		});
+
+		if (count < kLimit
+			|| oldestId <= 0
+			|| oldestId == _offsetId
+			|| (oldestDate > 0 && oldestDate < _fromDate)) {
+			finishCurrentChat();
+			return;
+		}
+		_offsetId = oldestId;
+		requestBatch();
+	}
+
+	void finishCurrentChat() {
+		if (_file) {
+			_file->close();
+			_file = nullptr;
+		}
+		processNextChat();
+	}
+
+	const not_null<Main::Session*> _session;
+	const TimeId _fromDate = 0;
+	QString _output;
+	std::vector<PeerData*> _peers;
+	QSet<QString> _usedNames;
+	size_t _index = 0;
+	PeerData *_currentPeer = nullptr;
+	std::unique_ptr<QFile> _file;
+	int _offsetId = 0;
+};
 
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
@@ -1087,7 +1280,7 @@ void BuildExportSection(SectionBuilder &builder) {
 
 	const auto startAllChatsJsonExport = [=] {
 		controller->window().hideSettingsAndLayer();
-		Core::App().exportManager().startAllChatsJsonBackground(session);
+		CustomAllChatsTextExporter::Start(session);
 	};
 
 	builder.addButton({

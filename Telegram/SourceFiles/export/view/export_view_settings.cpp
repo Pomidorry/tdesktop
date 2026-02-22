@@ -31,7 +31,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 #include "styles/style_export.h"
 #include "styles/style_layers.h"
-#include <QtCore/QDateTime>
 
 namespace Export {
 namespace View {
@@ -905,10 +904,6 @@ void SettingsWidget::refreshButtons(
 				data.types = Type::AnyChatsMask;
 				data.fullChats = Type::AnyChatsMask;
 				data.format = Format::Json;
-				data.singlePeerFrom = base::unixtime::serialize(
-					QDateTime::currentDateTime().addMonths(-12));
-				data.singlePeerTill = 0;
-				data.media.types = MediaTypes();
 			});
 		}) | rpl::to_empty;
 
@@ -938,8 +933,11 @@ void SettingsWidget::refreshButtons(
 			start->moveToRight(right, top);
 		}, start->lifetime());
 	}
-	_startClicks = std::move(startClicks);
-	_quickJsonClicks = std::move(quickJsonClicks);
+	_startClicks = start
+		? quickJson
+			? rpl::merge(std::move(startClicks), std::move(quickJsonClicks))
+			: std::move(startClicks)
+		: std::move(quickJsonClicks);
 
 	const auto cancel = Ui::CreateChild<Ui::RoundButton>(
 		container.get(),
@@ -988,13 +986,6 @@ rpl::producer<Settings> SettingsWidget::value() const {
 
 rpl::producer<> SettingsWidget::startClicks() const {
 	return _startClicks.value(
-	) | rpl::map([](Wrap &&wrap) {
-		return std::move(wrap.value);
-	}) | rpl::flatten_latest();
-}
-
-rpl::producer<> SettingsWidget::quickJsonClicks() const {
-	return _quickJsonClicks.value(
 	) | rpl::map([](Wrap &&wrap) {
 		return std::move(wrap.value);
 	}) | rpl::flatten_latest();

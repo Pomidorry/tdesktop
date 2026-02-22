@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include <QtCore/QString>
-
 class PeerData;
 
 namespace Ui {
@@ -22,8 +20,6 @@ class Session;
 namespace Export {
 
 class Controller;
-
-void WriteChatTextFilesFromJson(const QString &mainFilePath);
 
 namespace View {
 class PanelController;
@@ -42,7 +38,6 @@ public:
 		not_null<PeerData*> peer,
 		MsgId topicRootId,
 		const QString &topicTitle);
-	void startAllChatsJsonBackground(not_null<Main::Session*> session);
 
 	[[nodiscard]] rpl::producer<View::PanelController*> currentView() const;
 	[[nodiscard]] bool inProgress() const;
@@ -56,7 +51,6 @@ private:
 	std::unique_ptr<Controller> _controller;
 	std::unique_ptr<View::PanelController> _panel;
 	rpl::event_stream<View::PanelController*> _viewChanges;
-	rpl::lifetime _backgroundLifetime;
 
 };
 
