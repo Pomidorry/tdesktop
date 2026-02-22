@@ -215,7 +215,7 @@ private:
 				if (!oldestDate || date < oldestDate) {
 					oldestDate = date;
 				}
-				if (date < _fromDate || data.vmedia().type() != mtpc_messageMediaEmpty) {
+				if (date < _fromDate || data.vmedia()) {
 					return;
 				}
 				const auto text = qs(data.vmessage()).trimmed();
