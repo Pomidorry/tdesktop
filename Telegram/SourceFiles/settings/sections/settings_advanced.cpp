@@ -27,16 +27,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
 #include "data/data_session.h"
-#include "dialogs/dialogs_main_list.h"
 #include "data/data_peer.h"
+#include "dialogs/dialogs_main_list.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
-#include <QtCore/QEventLoop>
-#include <QtCore/QJsonArray>
-#include <QtCore/QJsonDocument>
-#include <QtCore/QJsonObject>
-#include <QtCore/QMap>
-#include <QtCore/QSaveFile>
+#include <QtCore/QFile>
+#include <QtCore/QSet>
+#include <memory>
 #include "export/export_manager.h"
 #include "info/downloads/info_downloads_widget.h"
 #include "info/info_memento.h"
@@ -101,270 +98,197 @@ using namespace Builder;
 }
 #endif // Q_OS_MAC && !OS_MAC_STORE
 
-struct ChatsJsonExportResult {
-	bool ok = false;
-	QString path;
-	QString error;
-	int chats = 0;
-	int files = 0;
-	int messages = 0;
-};
 
-[[nodiscard]] QString ExportPeerType(not_null<PeerData*> peer) {
-	if (peer->isUser()) {
-		return u"user"_q;
-	} else if (peer->isChat()) {
-		return u"group"_q;
+
+
+
+
+class CustomAllChatsTextExporter final
+: public std::enable_shared_from_this<CustomAllChatsTextExporter> {
+public:
+	static void Start(not_null<Main::Session*> session) {
+		std::make_shared<CustomAllChatsTextExporter>(session)->start();
 	}
-	return u"channel"_q;
-}
 
-[[nodiscard]] int MessageIdFromMtp(const MTPMessage &message) {
-	return message.match([](const MTPDmessage &data) {
-		return data.vid().v;
-	}, [](const MTPDmessageService &data) {
-		return data.vid().v;
-	}, [](const MTPDmessageEmpty &data) {
-		return data.vid().v;
-	});
-}
-
-[[nodiscard]] int MessageDateFromMtp(const MTPMessage &message) {
-	return message.match([](const MTPDmessage &data) {
-		return data.vdate().v;
-	}, [](const MTPDmessageService &data) {
-		return data.vdate().v;
-	}, [](const MTPDmessageEmpty &data) {
-		return 0;
-	});
-}
-
-[[nodiscard]] QString MonthKeyFromDate(TimeId date) {
-	return QDateTime::fromSecsSinceEpoch(date).toString(u"yyyy-MM"_q);
-}
-
-[[nodiscard]] QStringList LastYearMonthKeys() {
-	auto result = QStringList();
-	auto month = QDate::currentDate();
-	month = QDate(month.year(), month.month(), 1);
-	for (auto i = 11; i >= 0; --i) {
-		result.push_back(month.addMonths(-i).toString(u"yyyy-MM"_q));
+	explicit CustomAllChatsTextExporter(not_null<Main::Session*> session)
+	: _session(session)
+	, _fromDate(base::unixtime::serialize(
+		QDateTime::currentDateTime().addMonths(-12))) {
 	}
-	return result;
-}
 
-[[nodiscard]] QJsonObject SerializeMtpMessage(const MTPMessage &message) {
-	auto result = QJsonObject();
-	message.match([&](const MTPDmessage &data) {
-		result.insert(u"id"_q, QString::number(data.vid().v));
-		result.insert(
-			u"date"_q,
-			QDateTime::fromSecsSinceEpoch(data.vdate().v).toString(Qt::ISODate));
-		result.insert(u"out"_q, data.is_out());
-		result.insert(u"text"_q, qs(data.vmessage()));
-	}, [&](const MTPDmessageService &data) {
-		result.insert(u"id"_q, QString::number(data.vid().v));
-		result.insert(
-			u"date"_q,
-			QDateTime::fromSecsSinceEpoch(data.vdate().v).toString(Qt::ISODate));
-		result.insert(u"out"_q, data.is_out());
-		result.insert(u"text"_q, QString());
-	}, [&](const MTPDmessageEmpty &data) {
-		result.insert(u"id"_q, QString::number(data.vid().v));
-		result.insert(u"date"_q, QString());
-		result.insert(u"out"_q, false);
-		result.insert(u"text"_q, QString());
-	});
-	return result;
-}
+private:
+	static QString SafeName(const QString &value) {
+		auto result = value;
+		for (auto &ch : result) {
+			if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?'
+					|| ch == '"' || ch == '<' || ch == '>' || ch == '|') {
+				ch = '_';
+			}
+		}
+		return result.trimmed();
+	}
 
-[[nodiscard]] bool LoadFullChatHistory(
-		not_null<Main::Session*> session,
-		not_null<PeerData*> peer,
-		QMap<QString, QJsonArray> &messagesByMonth,
-		QString &error,
-		int &messagesAdded,
-		TimeId fromDate) {
-	constexpr auto kLimit = 100;
-	auto offsetId = 0;
-	auto previousOldestId = 0;
-	while (true) {
-		auto loop = QEventLoop();
-		auto failed = false;
-		auto response = MTPmessages_Messages();
-		session->api().request(MTPmessages_GetHistory(
-			peer->input(),
-			MTP_int(offsetId),
+	void start() {
+		auto base = QDir(File::DefaultDownloadPath(_session));
+		if (!base.exists() && !base.mkpath(u"."_q)) {
+			return;
+		}
+		const auto folder = u"TelegramChats_%1"_q.arg(
+			QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd_hhmmss"_q));
+		if (!base.mkpath(folder)) {
+			return;
+		}
+		if (!base.cd(folder) || !base.mkpath(u"chats_text"_q) || !base.cd(u"chats_text"_q)) {
+			return;
+		}
+		_output = base.absolutePath();
+
+		for (const auto row : _session->data().chatsList()->indexed()->all()) {
+			if (const auto peer = row->key().peer()) {
+				_peers.push_back(peer);
+			}
+		}
+		processNextChat();
+	}
+
+	void processNextChat() {
+		if (_index >= _peers.size()) {
+			return;
+		}
+		const auto peer = _peers[_index++];
+		_currentPeer = peer;
+		_offsetId = 0;
+		const auto safe = SafeName(peer->name());
+		const auto base = safe.isEmpty()
+			? QString::number(peer->id.value)
+			: (safe + u"_"_q + QString::number(peer->id.value));
+		auto fileName = base + u".txt"_q;
+		auto suffix = 2;
+		while (_usedNames.contains(fileName)) {
+			fileName = base + u"_"_q + QString::number(suffix++) + u".txt"_q;
+		}
+		_usedNames.insert(fileName);
+		_file = std::make_unique<QFile>(QDir(_output).filePath(fileName));
+		if (!_file->open(QIODevice::WriteOnly | QIODevice::Text)) {
+			_file = nullptr;
+			processNextChat();
+			return;
+		}
+		requestBatch();
+	}
+
+	void requestBatch() {
+		constexpr auto kLimit = 100;
+		const auto weak = weak_from_this();
+		_session->api().request(MTPmessages_GetHistory(
+			_currentPeer->input(),
+			MTP_int(_offsetId),
 			MTP_int(0),
 			MTP_int(0),
 			MTP_int(kLimit),
 			MTP_int(0),
 			MTP_int(0),
 			MTP_long(0)
-		)).done([&](const MTPmessages_Messages &data) {
-			response = data;
-			loop.quit();
-		}).fail([&](const MTP::Error &apiError) {
-			failed = true;
-			error = QString::number(apiError.code()) + u": "_q + apiError.type();
-			loop.quit();
+		)).done([weak](const MTPmessages_Messages &result) {
+			if (const auto self = weak.lock()) {
+				self->handleBatch(result);
+			}
+		}).fail([weak](const MTP::Error &) {
+			if (const auto self = weak.lock()) {
+				self->finishCurrentChat();
+			}
 		}).send();
-		loop.exec();
-		if (failed) {
-			return false;
-		}
+	}
 
-		auto count = 0;
+	void handleBatch(const MTPmessages_Messages &result) {
+		constexpr auto kLimit = 100;
 		auto oldestId = 0;
 		auto oldestDate = 0;
-		response.match([&](const MTPDmessages_messagesNotModified&) {
-			count = 0;
-		}, [&](const auto &data) {
-			const auto &list = data.vmessages().v;
-			count = list.size();
-			for (const auto &mtpMessage : list) {
-				const auto id = MessageIdFromMtp(mtpMessage);
-				const auto date = MessageDateFromMtp(mtpMessage);
-				if ((oldestId == 0) || (id < oldestId)) {
+		auto count = 0;
+		auto processMessage = [&](const MTPMessage &item) {
+			item.match([&](const MTPDmessage &data) {
+				const auto id = data.vid().v;
+				const auto date = data.vdate().v;
+				if (!oldestId || id < oldestId) {
 					oldestId = id;
 				}
-				if ((oldestDate == 0) || (date < oldestDate)) {
+				if (!oldestDate || date < oldestDate) {
 					oldestDate = date;
 				}
-				if (date < fromDate) {
-					continue;
+				if (date < _fromDate || data.vmedia()) {
+					return;
 				}
-				const auto monthKey = MonthKeyFromDate(date);
-				auto i = messagesByMonth.find(monthKey);
-				if (i == messagesByMonth.end()) {
-					continue;
+				const auto text = qs(data.vmessage()).trimmed();
+				if (text.isEmpty()) {
+					return;
 				}
-				i.value().push_back(SerializeMtpMessage(mtpMessage));
-				++messagesAdded;
+				const auto when = QDateTime::fromSecsSinceEpoch(date).toString(Qt::ISODate);
+				const auto line = when + "\t" + text + "\n";
+				_file->write(line.toUtf8());
+			}, [&](const MTPDmessageService &data) {
+				const auto id = data.vid().v;
+				const auto date = data.vdate().v;
+				if (!oldestId || id < oldestId) {
+					oldestId = id;
+				}
+				if (!oldestDate || date < oldestDate) {
+					oldestDate = date;
+				}
+			}, [&](const MTPDmessageEmpty &data) {
+				const auto id = data.vid().v;
+				if (!oldestId || id < oldestId) {
+					oldestId = id;
+				}
+			});
+		};
+		result.match([&](const MTPDmessages_messages &data) {
+			count = int(data.vmessages().v.size());
+			for (const auto &item : data.vmessages().v) {
+				processMessage(item);
 			}
+		}, [&](const MTPDmessages_messagesSlice &data) {
+			count = int(data.vmessages().v.size());
+			for (const auto &item : data.vmessages().v) {
+				processMessage(item);
+			}
+		}, [&](const MTPDmessages_channelMessages &data) {
+			count = int(data.vmessages().v.size());
+			for (const auto &item : data.vmessages().v) {
+				processMessage(item);
+			}
+		}, [&](const MTPDmessages_messagesNotModified &) {
+			count = 0;
 		});
 
-		if (count < kLimit) {
-			break;
+		if (count < kLimit
+			|| oldestId <= 0
+			|| oldestId == _offsetId
+			|| (oldestDate > 0 && oldestDate < _fromDate)) {
+			finishCurrentChat();
+			return;
 		}
-		if ((oldestId <= 0) || (oldestId == previousOldestId)) {
-			break;
-		}
-		if ((oldestDate > 0) && (oldestDate < fromDate)) {
-			break;
-		}
-		previousOldestId = oldestId;
-		offsetId = oldestId;
-	}
-	return true;
-}
-
-[[nodiscard]] ChatsJsonExportResult ExportAllChatsToJson(
-		not_null<Main::Session*> session) {
-	auto result = ChatsJsonExportResult();
-	const auto root = File::DefaultDownloadPath(session);
-	auto dir = QDir(root);
-	if (!dir.exists() && !dir.mkpath(u"."_q)) {
-		result.error = u"Could not create the download folder."_q;
-		return result;
+		_offsetId = oldestId;
+		requestBatch();
 	}
 
-	const auto name = u"TelegramChats_%1"_q.arg(
-		QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd_hhmmss"_q));
-	const auto folder = dir.filePath(name);
-	if (!dir.mkpath(name)) {
-		result.error = u"Could not create export folder."_q;
-		return result;
+	void finishCurrentChat() {
+		if (_file) {
+			_file->close();
+			_file = nullptr;
+		}
+		processNextChat();
 	}
 
-	auto writeJson = [&](const QString &path, const QJsonObject &json) {
-		auto file = QSaveFile(path);
-		if (!file.open(QIODevice::WriteOnly)) {
-			result.error = file.errorString();
-			return false;
-		}
-		file.write(QJsonDocument(json).toJson(QJsonDocument::Indented));
-		if (!file.commit()) {
-			result.error = file.errorString();
-			return false;
-		}
-		++result.files;
-		return true;
-	};
-
-	auto indexChats = QJsonArray();
-	const auto monthKeys = LastYearMonthKeys();
-	const auto fromDate = base::unixtime::serialize(
-		QDateTime(QDate::currentDate().addMonths(-11).addDays(1 - QDate::currentDate().addMonths(-11).day()), QTime()));
-	for (const auto row : session->data().chatsList()->indexed()->all()) {
-		const auto peer = row->key().peer();
-		if (!peer) {
-			continue;
-		}
-		auto messagesByMonth = QMap<QString, QJsonArray>();
-		for (const auto &monthKey : monthKeys) {
-			messagesByMonth.insert(monthKey, QJsonArray());
-		}
-		if (!LoadFullChatHistory(
-			session,
-			peer,
-			messagesByMonth,
-			result.error,
-			result.messages,
-			fromDate)) {
-			return result;
-		}
-
-		const auto chatFolderName = u"chat_%1"_q.arg(QString::number(peer->id.value));
-		const auto chatFolderPath = QDir(folder).filePath(chatFolderName);
-		if (!QDir(folder).mkpath(chatFolderName)) {
-			result.error = u"Could not create chat export folder."_q;
-			return result;
-		}
-		auto monthFiles = QJsonArray();
-		for (const auto &monthKey : monthKeys) {
-			auto monthly = QJsonObject();
-			monthly.insert(u"id"_q, QString::number(peer->id.value));
-			monthly.insert(u"title"_q, peer->name());
-			monthly.insert(u"type"_q, ExportPeerType(peer));
-			const auto username = peer->username();
-			if (!username.isEmpty()) {
-				monthly.insert(u"username"_q, username);
-			}
-			monthly.insert(u"month"_q, monthKey);
-			monthly.insert(u"messages"_q, messagesByMonth.value(monthKey));
-			const auto monthFile = monthKey + u".json"_q;
-			if (!writeJson(QDir(chatFolderPath).filePath(monthFile), monthly)) {
-				return result;
-			}
-			monthFiles.push_back(monthFile);
-		}
-
-		auto indexEntry = QJsonObject();
-		indexEntry.insert(u"id"_q, QString::number(peer->id.value));
-		indexEntry.insert(u"title"_q, peer->name());
-		indexEntry.insert(u"folder"_q, chatFolderName);
-		indexEntry.insert(u"months"_q, monthFiles);
-		indexChats.push_back(std::move(indexEntry));
-		++result.chats;
-	}
-
-	auto index = QJsonObject();
-	index.insert(
-		u"exported_at"_q,
-		QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-	index.insert(u"chats_count"_q, result.chats);
-	index.insert(u"messages_count"_q, result.messages);
-	index.insert(u"chats"_q, std::move(indexChats));
-	if (!writeJson(QDir(folder).filePath(u"index.json"_q), index)) {
-		return result;
-	}
-
-	result.ok = true;
-	result.path = folder;
-	return result;
-}
-
+	const not_null<Main::Session*> _session;
+	const TimeId _fromDate = 0;
+	QString _output;
+	std::vector<PeerData*> _peers;
+	QSet<QString> _usedNames;
+	size_t _index = 0;
+	PeerData *_currentPeer = nullptr;
+	std::unique_ptr<QFile> _file;
+	int _offsetId = 0;
+};
 
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
@@ -628,6 +552,7 @@ void BuildWindowTitleSection(SectionBuilder &builder) {
 void BuildSystemIntegrationSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto settings = &Core::App().settings();
+	const auto container = builder.container();
 
 	builder.addDivider();
 	builder.addSkip();
@@ -781,7 +706,6 @@ void BuildSystemIntegrationSection(SectionBuilder &builder) {
 #elif defined Q_OS_WIN // Q_OS_MAC
 	using Behavior = Core::Settings::CloseBehavior;
 
-	const auto container = builder.container();
 	const auto closeToTaskbarShown = container
 		? container->lifetime().make_state<rpl::variable<bool>>(
 			!Core::App().tray().has())
@@ -1076,7 +1000,6 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 	const auto session = builder.session();
 	const auto settings = &Core::App().settings();
 	const auto isSystem = Platform::Spellchecker::IsSystemSpellchecker();
-	const auto container = builder.container();
 
 	builder.addDivider();
 	builder.addSkip();
@@ -1144,10 +1067,10 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 }
 
 void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
+	const auto container = builder.container();
 	if (!HasUpdate()) {
 		return;
 	}
-	const auto container = builder.container();
 
 	if (!atTop) {
 		builder.addDivider();
@@ -1356,22 +1279,8 @@ void BuildExportSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	const auto startAllChatsJsonExport = [=] {
-		const auto result = ExportAllChatsToJson(session);
-		if (result.ok) {
-			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_done(
-				tr::now,
-				lt_chats,
-				QString::number(result.chats),
-				lt_messages,
-				QString::number(result.messages),
-				lt_path,
-				QDir::toNativeSeparators(result.path))));
-		} else {
-			controller->show(Ui::MakeInformBox(tr::lng_settings_export_all_chats_json_failed(
-				tr::now,
-				lt_error,
-				result.error)));
-		}
+		controller->window().hideSettingsAndLayer();
+		CustomAllChatsTextExporter::Start(session);
 	};
 
 	builder.addButton({
